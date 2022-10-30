@@ -1,0 +1,535 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<ASXMODULE VERSION="1.0" TITLE="Perso" CONTEXT="TFch_PCF_Devis"><LOCAL><SCRIPT>'-----------------------------------------------Class presspapier-------------------------------------------------------
+Class cClipBoard
+    Private objIE
+
+    Public Property Get Data()
+        Data = objIE.Document.ParentWindow.ClipboardData.GetData("Text")
+    End Property
+
+    Public Property Let Data ( Value )
+        objIE.Document.ParentWindow.ClipboardData.SetData "Text" , Value
+    End Property
+
+    Public Sub Clear()
+        objIE.Document.ParentWindow.ClipboardData.ClearData()
+    End Sub
+
+    Private Sub Class_Initialize
+        Set objIE = CreateObject("InternetExplorer.Application")
+        objIE.Navigate ("about:blank")
+    End Sub
+
+    Private Sub Class_Terminate
+        objIE.Quit
+        Set objIE = Nothing
+    End Sub
+End Class
+
+		'-----------------------------------------------Définition Objets-------------------------------------------------------
+set Fso = CreateObject("Scripting.FileSystemObject")
+set objOutlk = CreateObject("Outlook.Application")
+Set oXL = CreateObject("Excel.Application")
+Set WshShell = CreateObject("Wscript.Shell")
+Set net = CreateObject("WScript.Network" )
+Set oShell = CreateObject("Shell.Application")
+
+'=====================================
+' A renseigner !
+'-------------------------------------
+
+gsTypeDoc = "AFFAIRE"
+gsCheminDepart = "Y:\Affaires"
+
+'Variables Standart 'Variables du BC en PDF 'Variables de la PJ en PDF 'Variables de l'ARC en PD
+TabTypeDoc = Array("CODEMDE", "OPFOUR", "OPFOURPJ", "OPFOUROP", "OPFOURORI", "END")
+TabCheminDepart = Array("FILE-ADRESS", "Y:\AFFAIRES\CHANTIERS\", "S:\", "S:\", "S:\", "END")
+TabQuestion = Array("Le * actuel  est '", "La DP actuel  est '", "La PJ actuel  est '", "L'Ofre de Prix actuel  est '", "Le document d'origine est '", "END")
+TabChemin = Array("Dossier", "", "_PJ\", "", "_ORIGINE\", "END")
+TabNameFile = Array("Sufix fichier", "", "_PJ", "_OP", "_ORI", "END")
+
+RepTemp = Array("Répertoir Tmp", "S:\", "Z:\Users\Virginie\Scan")
+PDFTk = """C:\Program Files (x86)\PDFtk\bin\pdftk.exe"""
+Adobe = """C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe"""
+FileScriptCollerTmp = "C:\Script\CollerTmp.vbs"
+TypeDoc = "DEVISFOURN"
+stRepProjets = "Y:\AFFAIRES\PROJETS"
+StRepChantiers = "Y:\AFFAIRES\CHANTIERS"
+
+FonctionInterloc = "DP"
+FonctionTable = "ENTETEDEVISFOURNISSEUR"
+FonctionInterlocComm = "COMM"
+
+EmailCache = ""
+
+'=====================================
+
+		'-----------------------------------------------Fonction Bouton-------------------------------------------------------
+Sub DPPDF
+    ExploreCheminPDF(1)
+End Sub
+
+Sub PJPDF
+    ExploreCheminPDF(2)
+End Sub
+
+Sub OPPDF
+    ExploreCheminPDF(3)
+End Sub
+
+Sub OriPDF
+    ExploreCheminPDF(4)
+End Sub
+
+Sub DPSearch
+    CheminDocPDF(1)
+End Sub		
+
+Sub PJSearch
+    CheminDocPDF(2)
+End Sub	
+
+Sub OPSearch
+    CheminDocPDF(3)
+End Sub
+
+Sub OriSearch
+    CheminDocPDF(4)
+End Sub
+
+Sub PJPush
+    PushDocPDF(2)
+End Sub	
+
+Sub OPPush
+    PushDocPDF(3)
+End Sub	
+
+Sub OriPush
+    PushDocPDF(4)
+End Sub	
+
+		'-----------------------------------------------Modification code redacteur-------------------------------------------------------
+Sub CodeRedac
+	If GetValue("saiCodeRedacteur")="" And User() &lt;&gt; "Admin" Then
+		SetValue "saiCodeRedacteur" , User()
+		SetEnabled "saiCodeRedacteur" ,FALSE
+		sSql="UPDATE ENTETEDEVISFOURNISSEUR SET REDACTEUR = '" &amp; User() &amp; "' WHERE CODEDOCUTIL='" &amp; GetCodeCourant() &amp; "'"
+		ExecuterMaj(sSql)
+	End If
+End Sub
+
+		'-----------------------------------------------Modification etape de commande-------------------------------------------------------
+Function SaisiEtat(Etat)
+    SetValue "saiEtat" , Etat
+		'En cours 11
+		'Envoyeée 12
+		'OP Reçu 60
+End Function
+
+		'-----------------------------------------------Envoie mail-------------------------------------------------------
+Sub Mail
+    File = SetChemin("") &amp; SetName("")
+    If Not(Fso.FileExists(File)) Then
+        GenerePDF
+    End If
+	sQuestion="Voulez-vous lancer l'impression papier automatique?"
+    'If MsgBox(sQuestion,vbQuestion+VbYesNo) = vbYes Then
+    '    Print
+    'End If
+    sSql="select libelle,adr,cp,ville from PMECHANTIER where code='" &amp; GetValue("saiChantier") &amp; "'"
+    Set Rcs = CreateRecordSet(sSql)
+    If Rcs.RecordCount &lt;&gt; 0 Then
+        Ville = Rcs.GetValue("ville")
+    End If
+    Set Rcs = Nothing
+    If GetValue("saiChantier")&lt;&gt;"" Then CodeChantier = GetValue("saiChantier") Else If GetValue("SaisAffaire")&lt;&gt;"" Then CodeChantier = GetValue("SaisAffaire") Else CodeChantier = "STOCK" End If End If
+    If Ville &lt;&gt; "" Then Ville = "_" &amp; Ville End If
+    CodeBC = CodeChantier &amp; "/" &amp; GetValue("saiCode") &amp; Ville
+	const olMailItem = 0
+	set objMail = objOutlk.createitem(olMailItem)
+    objMail.Display
+    Email = SelectInterloc()
+    If Email = "" Then
+        Email = GetValue("saiAdrFacEMail")
+    End If
+	objMail.To = Email
+	'objMail.CC = EmailConduc()
+	'objMail.BCC = EmailCache
+	objMail.subject = "Demande de Prix " &amp; CodeBC
+    objMail.attachments.add(SetChemin("") &amp; SetName(""))
+    objMail.HTMLBody = "&lt;div style=""font-family:Arial;font-size:16px;""&gt;Bonjour, &lt;br&gt;Veuillez trouver ci-jointe, la demande de prix n°" &amp; CodeBC &amp; "&lt;br&gt;Merci de nous indiquer votre délai de livraison&lt;br&gt;Vous en souhaitant bonne réception.&lt;br&gt;Cordialement.&lt;/div&gt;" &amp; objMail.HTMLBody
+	set objMail = nothing
+	set objOutlk = nothing
+	sQuestion="Voulez-vous marquer la Demande de prix comme Envoyée?"
+        If MsgBox(sQuestion,vbQuestion+VbYesNo) = vbYes Then
+            SaisiEtat(12)
+'            WshShell.SendKeys "%v"
+'            WshShell.SendKeys "{ENTER}"
+        End If
+End Sub
+
+		'-----------------------------------------------Explorer fichier-------------------------------------------------------
+Function Explorer(Dir)
+	strFilter = ""
+	intFilterIndex = 0
+	strTitle = "Selectioner le fichier à importer"
+	strButtonText= "Selectioner"
+	oXL.DefaultFilePath = Dir
+	Explorer = oXL.GetOpenFileName( strFilter, intFilterIndex, strTitle, strButtonText, False )
+End Function
+
+		'-----------------------------------------------Générer nom-------------------------------------------------------
+Function SetName(Ext)
+	DateEnvoie = GetValue("DateDoc")
+	TabDate = split(DateEnvoie, "/")
+	If GetValue("saiChantier")&lt;&gt;"" Then CodeChantier = GetValue("saiChantier") Else If GetValue("SaisAffaire")&lt;&gt;"" Then CodeChantier = GetValue("SaisAffaire") Else CodeChantier = "STOCK" End If End If
+	SetName = GetValue("SaisCodeTiers") &amp; "_" &amp; CodeChantier &amp; "." &amp; GetValue("saiCode") &amp; "_" &amp; TabDate(2) &amp; "." &amp; TabDate(1) &amp; "." &amp; TabDate(0) &amp; Ext &amp; ".pdf"
+End Function
+
+		'-----------------------------------------------Chemin enregistrement-------------------------------------------------------
+Function SetChemin(Dossier)
+    sSql="SELECT CHEMIN FROM Documents WHERE Type='AFFAIRE' and Code='" &amp; GetValue("SaisAffaire") &amp; "'"
+    Set Rcs=CreateRecordSet(sSql)
+    If Rcs.RecordCount &lt;&gt; 0 Then
+		If Dossier = "06_Plans" Then
+			CheminArrive=rcs.GetValue("CHEMIN")&amp;"\06_Plans\"
+		Else
+			CheminArrive=rcs.GetValue("CHEMIN")&amp;"\07_Fournisseurs\Consultations\" &amp; Dossier
+		End If
+    End If
+    Set Rcs = Nothing
+    If Not(Fso.FolderExists(CheminArrive)) Then Fso.CreateFolder(CheminArrive) End If
+SetChemin = CheminArrive
+End Function
+
+		'-----------------------------------------------Fonction nom dans presspapier-------------------------------------------------------
+Sub NameFileCDE
+	Set Clipboard = New cClipBoard
+	ClipBoard.Clear 'Effacement du contenu du presse papier
+	ClipBoard.Data = SetName("")
+End Sub
+
+		'-----------------------------------------------Fonction PDF-------------------------------------------------------
+Sub GenerePDF
+    CodeRedac
+    TypeEdition = GetTypeSaisie()
+	Set Clipboard = New cClipBoard
+	ClipBoard.Clear 'Effacement du contenu du presse papier
+	ClipBoard.Data = GetValue("saiCode")
+	FileFinal =SetChemin("") &amp; SetName("_tmp")
+    If (Fso.FileExists(FileFinal) ) Then
+        Fso.DeleteFile FileFinal
+    End If
+    WshShell.run("Explorer" &amp;" " &amp; FileScriptCollerTmp)
+    Imprimer TypeEdition,TypeDoc,"PDF",FileFinal
+    MergePDF
+End Sub
+
+		'-----------------------------------------------Fonction Impression-------------------------------------------------------
+Sub Print
+	'Curseur("Wait")
+	'TypeEdition = GetTypeSaisie()
+	'Set Clipboard = New cClipBoard
+	'ClipBoard.Clear 'Effacement du contenu du presse papier
+	'ClipBoard.Data = GetValue("saiCode")
+    'WshShell.run("Explorer" &amp;" " &amp; FileScriptCollerTmp)
+    'Imprimer TypeEdition,TypeDoc,"PDF","c:\Temp\MDE_Tmp1.pdf"
+	'WshShell.run(Adobe &amp; " /p /h /t ""c:\Temp\MDE_Tmp1.pdf"" ""\\SERVEUR\Canon Exemplaire Dossier"" ""Canon iR-ADV C5235/5240 PCL6"" ""190.10.10.231""")
+	'Curseur("")
+End Sub
+
+		'-----------------------------------------------Fonnction type de saisie-------------------------------------------------------
+Function GetTypeSaisie()
+	TypeSaisie = getvalue("SaisGroupe")
+	If TypeSaisie = "" Then
+		TypeSaisie = InputBox("Les types de saisie sont:" &amp; vbCrLf &amp; "S : Standard " &amp; vbCrLf &amp; "D : Détaillé" &amp; vbCrLf ,"Le type de saisie n'est pas renseigné", "S")
+		If TypeSaisie &lt;&gt; "D" And TypeSaisie &lt;&gt; "S" Then TypeSaisie = "" End If
+		SetValue "SaisGroupe" ,TypeSaisie
+	End If
+	TypeEdition = "9"
+	If TypeSaisie = "D" Then TypeEdition = "10" End If
+GetTypeSaisie = TypeEdition
+End Function
+
+		'-----------------------------------------------Change le curseur-------------------------------------------------------
+Function Curseur(Etat)
+	If Etat = "Wait" Then oXL.Cursor = xlWait Else oXL.Cursor = xlDefault End If
+End Function
+
+		'-----------------------------------------------Affiche le document-------------------------------------------------------
+Function ExploreCheminPDF(D)
+    TestFilePDF = SetChemin(TabChemin(D)) + SetName(TabNameFile(D))
+    If Not (Fso.FileExists(TestFilePDF)) Then
+        CheminDocPDF(D)
+    Else
+        WshShell.run("Explorer """ &amp; TestFilePDF &amp; """ ")
+    End If
+End Function
+
+		'-----------------------------------------------Change ou attribut le chemin du document-------------------------------------------------------
+Function CheminDocPDF(Cdata)
+	'Dim SFile as Variant
+	SFile = Explorer(TabCheminDepart(Cdata))
+	If SFile = False Then
+	   Exit Function
+    End If
+	TestFilePDF = SetChemin(TabChemin(Cdata)) + SetName(TabNameFile(Cdata))
+	If ((SFile &lt;&gt; False) And (TestFilePDF &lt;&gt; SFile)) Then
+		If (Fso.FileExists(TestFilePDF)) Then
+			Fso.DeleteFile TestFilePDF
+		End if
+		If  Left(SFile, 3) = RepTemp(1) or Left(SFile,22) = RepTemp(2) Then
+			Fso.MoveFile SFile, TestFilePDF
+		Else
+			Fso.CopyFile SFile, TestFilePDF
+		End If			
+	End If
+	If Cdata = 3 Then
+        SaisiEtat(60)
+        WshShell.SendKeys "%v"
+        WshShell.SendKeys "{ENTER}"
+    End If
+    ExploreCheminPDF(Cdata)
+End Function
+
+		'-----------------------------------------------Ajoute un document en plus-------------------------------------------------------
+Function PushDocPDF(Cdata)
+	SFile = Explorer(TabCheminDepart(Cdata))
+	If SFile = False Then
+	   Exit Function
+    End If
+	TestFilePDF = SetChemin(TabChemin(Cdata)) + SetName(TabNameFile(Cdata))
+	If (Fso.FileExists(TestFilePDF)) Then
+		FileTmp = SetChemin(TabChemin(Cdata)) + SetName("TMP")
+		Fso.MoveFile TestFilePDF, FileTmp
+		sParameters = " """ &amp; FileTmp &amp; """" &amp; " """ &amp; SFile &amp; """"
+		param = PDFTk &amp; sParameters &amp; " cat output """ &amp; TestFilePDF &amp; """"
+		If (Fso.FileExists(TestFilePDF)) Then
+			Fso.DeleteFile TestFilePDF
+		End If
+		WshShell.run param
+		Sleep 2
+		If (Fso.FileExists(FileTmp)) Then
+			Fso.DeleteFile FileTmp
+		End If
+		If (Fso.FileExists(SFile)) Then
+			Fso.DeleteFile SFile
+		End If	
+	End If
+    ExploreCheminPDF(Cdata)
+End Function
+
+		'-----------------------------------------------Lance une requete SQL-------------------------------------------------------
+Function ExecuterMaj(aSQL)
+    set MyRcs = CreateRecordset(aSql &amp; "/* SELECT : mention obligatoire */")
+    set MyRcs = Nothing
+End Function
+
+		'-----------------------------------------------Fusione les PDF-------------------------------------------------------
+Sub MergePDF
+	Curseur("Wait")
+	Chemin1 = SetChemin("")
+	Chemin2 = SetChemin("_PJ\")
+	Name1 = SetName("_tmp")
+	Name2 = SetName("_PJ")
+	File1 = Chemin1 &amp; Name1
+	File2 = Chemin2 &amp; Name2
+	FileFinalFusion = Chemin1 &amp; SetName("")
+	sParameters = ""
+	If Fso.FileExists(File1) Then
+		sParameters = sParameters &amp; " """ &amp; File1 &amp; """"
+		If Not Fso.FileExists(File2) Then
+			sQuestion="Il n'y a pas de pièce jointe enregistré , souhaitez-vous en ajouter une ?"
+			If MsgBox(sQuestion,vbQuestion+VbYesNo) = vbYes Then
+				CheminDocPDF(2)
+				sParameters = sParameters &amp; " """ &amp; File2 &amp; """"
+			End If
+		Else
+		sParameters = sParameters &amp; " """ &amp; File2 &amp; """"
+        End If
+        param = PDFTk &amp; sParameters &amp; " cat output """ &amp; FileFinalFusion &amp; """"
+        If (Fso.FileExists(FileFinalFusion) ) Then
+		  Fso.DeleteFile FileFinalFusion
+        End If
+        WshShell.run param
+        Sleep 1
+        If Fso.FileExists(File1) Then Fso.DeleteFile File1 End If
+	    Sleep 1
+	    WshShell.run("Explorer" &amp;" " &amp; FileFinalFusion)
+	    Curseur("")
+	End If
+End Sub
+
+		'-----------------------------------------------Renvoe le code utilisateur-------------------------------------------------------
+Function User()
+	If UserName &lt;&gt; "Admin" Then
+		TabName = Split(UserName," ")
+		sSql="select CODEGESTION from COMM_EMPLOYE where NOM='" &amp; TabName(1) &amp; "' AND PRENOM='" &amp; TabName(0) &amp; "'"
+		Set Rcs = CreateRecordSet(sSql)
+		If Rcs.RecordCount &lt;&gt; 0 Then Id = Rcs.GetValue("CODEGESTION") End If
+User = Id
+	Else
+User = "Admin"
+	End If
+End Function
+
+		'-----------------------------------------------Restriction utilisateur-------------------------------------------------------
+Function Auth()
+	If User()="ACD" Or User()="CDA" Then Auth = False Else Auth = True End If
+End Function
+
+		'-----------------------------------------------Fonction attente-------------------------------------------------------
+Sub Sleep(Delai)
+dteWait = DateAdd("s", Delai, Now())
+Do Until (Now() &gt; dteWait)
+Loop
+End Sub
+
+		'-----------------------------------------------Fonction Explorer Chemin Affaire-------------------------------------------------------
+Sub ExploreChemin
+    bCheminExiste=Faux
+    sChemin = ""
+    sSql="SELECT CHEMIN FROM Documents WHERE Type='" &amp; gsTypeDoc &amp; "' and Code='" &amp; GetValue("SaisAffaire") &amp; "'"
+    Set Rcs=CreateRecordSet(sSql)
+    If Rcs.RecordCount &lt;&gt; 0 Then
+        bCheminExiste=TRUE
+        sChemin=rcs.GetValue("CHEMIN")
+    End If
+    Set Rcs = Nothing
+    If Not bCheminExiste Or Not FSO.FolderExists(sChemin) Then
+		CheminDoc
+	Else
+        WshShell.run("Explorer" &amp;" " &amp; sChemin &amp; "\")
+    End If
+End Sub
+
+		'-----------------------------------------------Fonction Cherche Chemin Affaire-------------------------------------------------------
+Sub CheminDoc
+    bChangeChemin=TRUE
+    bCheminExiste=FALSE
+    sSql="SELECT CHEMIN FROM Documents WHERE Type='" &amp; gsTypeDoc &amp; "' and Code='" &amp; GetValue("SaisAffaire") &amp; "'"
+    Set Rcs=CreateRecordSet(sSql)
+    If Rcs.RecordCount &lt;&gt; 0 Then
+        bCheminExiste=TRUE
+        SelectFolder=rcs.GetValue("CHEMIN")
+        If FSO.FolderExists(SelectFolder) Then
+            Exit Sub
+        End If
+    End If
+    Set Rcs = Nothing
+    SelectFolder = ""
+    CodeAffaire =GetValue("SaisAffaire")
+    CheminFind = SearchFolder(stRepProjets, CodeAffaire)
+    If CheminFind = "" Then CheminFind = SearchFolder(stRepChantiers, CodeAffaire) End If
+    If CheminFind = "" And Auth() Then
+        Set objFolder = oShell.BrowseForFolder( 0, "Sélection du chemin", 0, gsCheminDepart )
+        If IsObject( objfolder ) Then SelectFolder = objFolder.Self.Path End If
+    Else SelectFolder = CheminFind
+    End If
+    If SelectFolder &lt;&gt; "" Then
+        SelectFolder = Replace(SelectFolder, "'", "''" )
+        If bCheminExiste THEN
+            sSql="UPDATE Documents SET Chemin = '" &amp; SelectFolder &amp; "' WHERE TYPE='" &amp; gsTypeDoc &amp; "' AND CODE='" &amp; GetValue("SaisAffaire") &amp; "'"
+        Else
+            sSql ="INSERT INTO Documents (Type,Code,Chemin) VALUES ('" &amp; gsTypeDoc &amp; "','" &amp; GetValue("SaisAffaire") &amp; "','" &amp; SelectFolder &amp; "')"
+        End If
+        ExecuterMaj(sSql)
+        ExploreChemin
+    End If
+End Sub
+
+		'-----------------------------------------------Fonction Cherche Chemin Affaire Auto-------------------------------------------------------
+Function SearchFolder(Dir, CA)
+	SearchFolder = ""
+	If FSO.FolderExists(Dir) Then
+		For each oFld in  FSO.GetFolder(Dir).SubFolders
+			For each SoFld in  FSO.GetFolder(OFld).SubFolders
+				If Right(SoFld.Name, 6) = CA Then
+					SearchFolder = SoFld
+					Exit Function
+				End If
+			Next
+		Next
+	End If
+End Function
+
+		'-----------------------------------------------Fonction Cherche Interloc-------------------------------------------------------
+Function SelectInterloc()
+    Email = ""
+    sSql="SELECT IDADRLIVRAISON, IDADRFACTURATION FROM COMM_TIERS WHERE CODEGESTION='" &amp; GetValue("SaisCodeTiers") &amp; "'"
+    set MyRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    Id = MyRcs.GetValue(1)
+	Id2 = MyRcs.GetValue(2)
+    sSql="SELECT IDENTIFIANT, NOM, TEL, FAX, PORTABLE, EMAIL FROM COMM_TIERSINTERLOC WHERE IDADR='" &amp; Id &amp; "' OR IDADR='" &amp; Id2 &amp; "'"
+    set MyRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    NRow = MyRcs.RecordCount
+    For i = 1 To NRow
+        IdInterloc = MyRcs.GetValue(1)
+        rSql="SELECT " &amp; FonctionInterloc &amp; " FROM FONCTIONINTERLOC WHERE ID='" &amp; IdInterloc &amp; "'"
+        set TestRcs = CreateRecordset(rSql &amp; "/* SELECT : mention obligatoire */")
+        If TestRcs.RecordCount&gt;0 Then
+            If TestRcs.GetValue(1) Then
+                Email = Email &amp; MyRcs.GetValue(6) &amp; ";"
+                uSql="UPDATE "&amp; FonctionTable &amp;" SET IDINTERLOC = '" &amp; MyRcs.GetValue(1) &amp; "' ,NOMINTERLOC = '" &amp; MyRcs.GetValue(2) &amp; "' ,TELINTERLOC = '" &amp; MyRcs.GetValue(3) &amp; "' ,FAXINTERLOC = '" &amp; MyRcs.GetValue(4) &amp; "' ,PORTABLEINTERLOC = '" &amp; MyRcs.GetValue(5) &amp; "' ,EMAILINTERLOC = '" &amp; MyRcs.GetValue(6) &amp; "' WHERE CODEDOCUTIL='" &amp;  GetValue("saiCode") &amp; "'"
+                set uRcs = CreateRecordset(uSql &amp; "/* SELECT : mention obligatoire */")
+                set uRcs = Nothing
+            End If
+        End If
+        MyRcs.MoveNext()
+        set TetstRcs = Nothing
+    Next
+    sSql="SELECT IDENTIFIANT, NOM, TEL, FAX, PORTABLE, EMAIL FROM COMM_TIERSINTERLOC WHERE IDADR='" &amp; Id &amp; "' OR IDADR='" &amp; Id2 &amp; "'"
+    set MyRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    NRow = MyRcs.RecordCount
+    For i = 1 To NRow
+        IdInterloc = MyRcs.GetValue(1)
+        rSql="SELECT " &amp; FonctionInterlocComm &amp; " FROM FONCTIONINTERLOC WHERE ID='" &amp; IdInterloc &amp; "'"
+        set TestRcs = CreateRecordset(rSql &amp; "/* SELECT : mention obligatoire */")
+        If TestRcs.RecordCount&gt;0 Then
+            If TestRcs.GetValue(1) Then
+                uSql="UPDATE "&amp; FonctionTable &amp;" SET IDINTERLOC = '" &amp; MyRcs.GetValue(1) &amp; "' ,NOMINTERLOC = '" &amp; MyRcs.GetValue(2) &amp; "' ,TELINTERLOC = '" &amp; MyRcs.GetValue(3) &amp; "' ,FAXINTERLOC = '" &amp; MyRcs.GetValue(4) &amp; "' ,PORTABLEINTERLOC = '" &amp; MyRcs.GetValue(5) &amp; "' ,EMAILINTERLOC = '" &amp; MyRcs.GetValue(6) &amp; "' WHERE CODEDOCUTIL='" &amp;  GetValue("saiCode") &amp; "'"
+                set uRcs = CreateRecordset(uSql &amp; "/* SELECT : mention obligatoire */")
+                set uRcs = Nothing
+            End If
+        End If
+        MyRcs.MoveNext()
+        set TetstRcs = Nothing
+    Next
+    Sleep 2
+    set MyRcs = Nothing
+    SelectInterloc = Email
+End Function
+
+		'-----------------------------------------------Fonction Cherche Conduc-------------------------------------------------------
+Function EmailConduc()
+    If GetValue("saiChantier") = "" Then
+        EmailConduc = ""
+        Exit Function
+    End If
+    sSql="SELECT CODESALRESP FROM PMECHANTIER WHERE CODE='" &amp; GetValue("saiChantier") &amp; "'"
+    set MyRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    Id = MyRcs.GetValue(1)
+    sSql="SELECT RTCFIELD1 FROM PMESALARIE WHERE CODE='" &amp; Id &amp; "'"
+    set cRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    EmailConduc = cRcs.GetValue(1)
+    set cRcs = Nothing
+    set MyRcs = Nothing
+End Function
+
+
+		'-----------------------------------------------Fonction Cherche Transfert Doc-------------------------------------------------------
+Sub TransfertDoc
+    sSql="SELECT CODEDOCDESTINATION FROM TRACABILITEDOC WHERE CODEDOCORIGINE='" &amp; GetValue("saiCode") &amp; "'"
+    set MyRcs = CreateRecordset(sSql &amp; "/* SELECT : mention obligatoire */")
+    NRow = MyRcs.RecordCount
+    If NRow = 0 Then MsgBox "Pas de BC"
+    For i = 1 To NRow
+        DpCode = MyRcs.GetValue(1)
+        AppelFiche "CdeFou_FM", DpCode
+        MyRcs.MoveNext()
+    Next
+End Sub</SCRIPT><FONCTIONS><FONCTION NAME="DPPDF"/><FONCTION NAME="PJPDF"/><FONCTION NAME="OPPDF"/><FONCTION NAME="OriPDF"/><FONCTION NAME="DPSearch"/><FONCTION NAME="PJSearch"/><FONCTION NAME="OPSearch"/><FONCTION NAME="OriSearch"/><FONCTION NAME="PJPush"/><FONCTION NAME="OPPush"/><FONCTION NAME="OriPush"/><FONCTION NAME="CodeRedac"/><FONCTION NAME="Mail"/><FONCTION NAME="NameFileCDE"/><FONCTION NAME="GenerePDF"/><FONCTION NAME="Print"/><FONCTION NAME="GetTypeSaisie"/><FONCTION NAME="MergePDF"/><FONCTION NAME="User"/><FONCTION NAME="Auth"/><FONCTION NAME="ExploreChemin"/><FONCTION NAME="CheminDoc"/><FONCTION NAME="SelectInterloc"/><FONCTION NAME="EmailConduc"/><FONCTION NAME="TransfertDoc"/></FONCTIONS></LOCAL><INTERFACE><ITEM NAME="Documents Affaire" FONCTION="ExploreChemin"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAId3M3AAAAAIiIh3iIiIAAiIiHe7u7gACIiId7u7eAAIiIh3i7uIAAiIiHeIu/gACIiId4iI+AAIiIh3iIj4AAiIj3iIiIgACPiPiIiIiAAI/4+IiIiAAAj//4iIiIAACP//iI+IgAAI//+Ij/+AAIj/iI///4AACIiIiIiIgADAfwAAgAMAAIADAACAAwAAgAMAAIADAACAAwAAgAMAAIADAACAAwAAgAcAAIAHAACABwAAgAcAAAAHAACABwAA</ICON></ITEM><ITEM NAME="DP PDF" FONCTION="DPPDF"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAB3d3d3AAAAd3iIiId3AAd3h3ZneHdwB3h0eIdHh3B3h2SP90R4d3iGZIj3REeHeHZkiPdER4d4dmaI90RGh3h3doj3RkaHeHd3j/dGZ4d4h3d3fGZoh3eId4/3Z3h3B3iHj/h3h3AHd4iIh4h3cAB3eIiIh3cAAAB3d3d3AADwDwAAwAMAAIABAACAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAAgAEAAMADAADwDwAA</ICON></ITEM><ITEM NAME="Origine" FONCTION="OriPDF"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAREQAAAAAAEzMzMQAAAAMzMzMzMAAAMzMzMzMzAAEzMzs7MzMQAzMzs7uzMzATMzu7u7szMRMzs7v/u7MxEzM7u/+7MzETMzO7u7MzMQMzO7u7uzMwATMzM7MzMxAAMzMzMzMzAAADMzMzMzAAAAATMzMxAAAAAAAREQAAADwDwAA4AcAAMADAACAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAAwAMAAOAHAADwDwAA</ICON></ITEM><ITEM TYPE="button" NAME="PJ" FONCTION="PJPDF"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAAj4AAAAAAAI//8AAAAACP/4iIAAAAf/+IiI8AAAAPiIiIiIAAAIf4iIiI8AAP9/iIiIiIAAD4f4j4iI8ACH9//4+IiIAP94eIiIj/8Aj/d/iF//+AAAj3f4d4gAAAAAgHiIBwAAAAAAd3cAAAAAAAAAAAAAD/HwAA/A8AAPAPAADABwAAwAcAAMADAACAAwAAAAEAAIABAAAAAAAAAAAAAAAAAACAAQAA4AMAAPgHAAD//wAA</ICON></ITEM><ITEM NAME="OP" FONCTION="OPPDF"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAHd3d3d3d3AAf///////cAB///////9wAH+IiIiIj3AAj///////gACPiIj2d4+AAI////eP/4AAj4iI+IiPgACP//////+AAI+Id3d3f4AAj///////gACPf3+Ij/iAAI/3f//4iIAAj/9///j4gACP////+I8AAIiIiIiI8ADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMADAADABwAA</ICON></ITEM><ITEM NAME="Modif Chemin Affiare" TYPE="menu" FONCTION="CheminDoc"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAId3M3AAAAAIiIh3iIiIAAiIiHe7u7gACIiId7u7eAAIiIh3i7uIAAiIiHeIu/gACIiId4iI+AAIiIh3iIj4AAiIj3iIiIgACPiPiIiIiAAI/4+IiIiAAAj//4iIiIAACP//iI+IgAAI//+Ij/+AAIj/iI///4AACIiIiIiIgADAfwAAgAMAAIADAACAAwAAgAMAAIADAACAAwAAgAMAAIADAACAAwAAgAcAAIAHAACABwAAgAcAAAAHAACABwAA</ICON></ITEM><ITEM NAME="Modif Chemin DP" FONCTION="DPSearch" TYPE="menu"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAADPz8/PzMzAAMzMzMzAzMAAAAAAAAgAAAAAAAAABuAAAHiIiIiG4DAAP4iIiIhuAAA/iIiIiG4AAD+IiIiIhuAAP4iIiIiG4AA/iIiIiIhmAD+IiIiIiGkQP///////cQA4iIiIMzMwAAP/+IMAAAAAADMzMAAAAAAAAwAAAAMAAAADAAD/nwAAgAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAEAAAABAAAAAwAAAAcAAIB/AADA/wAA</ICON></ITEM><ITEM NAME="Modif Origine" TYPE="menu" FONCTION="OriSearch"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAREQAAAAAAEzMzMQAAAAMzMzMzMAAAMzMzMzMzAAEzMzs7MzMQAzMzs7uzMzATMzu7u7szMRMzs7v/u7MxEzM7u/+7MzETMzO7u7MzMQMzO7u7uzMwATMzM7MzMxAAMzMzMzMzAAADMzMzMzAAAAATMzMxAAAAAAAREQAAADwDwAA4AcAAMADAACAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAAwAMAAOAHAADwDwAA</ICON></ITEM><ITEM TYPE="menu" NAME="Modif Chemin PJ" FONCTION="PJSearch"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAAj4AAAAAAAI//8AAAAACP/4iIAAAAf/+IiI8AAAAPiIiIiIAAAIf4iIiI8AAP9/iIiIiIAAD4f4j4iI8ACH9//4+IiIAP94eIiIj/8Aj/d/iF//+AAAj3f4d4gAAAAAgHiIBwAAAAAAd3cAAAAAAAAAAAAAD/HwAA/A8AAPAPAADABwAAwAcAAMADAACAAwAAAAEAAIABAAAAAAAAAAAAAAAAAACAAQAA4AMAAPgHAAD//wAA</ICON></ITEM><ITEM TYPE="menu" NAME="Ajouter PJ" FONCTION="PJPush"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAAAAAAAAd3d3d3AgAAB/////cCIAAI///yIiKiAAj///KqqqowCP//8zMzowAI////+PMwAAj////484AACP////j/gAAI///4iP+AAAj///j4/4AACIiIiI//gAAAAI///4iAAAAAj///j4AAAACIiIiI8AD//wAA//8AAIAvAACAJwAAgAMAAIABAACAAwAAgAcAAIAHAACABwAAgAcAAIAHAACABwAA8AcAAPAHAADwBwAA</ICON></ITEM><ITEM NAME="Ajouter Origine" TYPE="menu" FONCTION="OriPush"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAREQAAAAAAEzMzMQAAAAMzMzMzMAAAMzMzMzMzAAEzMzs7MzMQAzMzs7uzMzATMzu7u7szMRMzs7v/u7MxEzM7u/+7MzETMzO7u7MzMQMzO7u7uzMwATMzM7MzMxAAMzMzMzMzAAADMzMzMzAAAAATMzMxAAAAAAAREQAAADwDwAA4AcAAMADAACAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAAwAMAAOAHAADwDwAA</ICON></ITEM><ITEM NAME="Modif Chemin OP" TYPE="menu" FONCTION="OPSearch"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAHd3d3d3d3AAf///////cAB///////9wAH+IiIiIj3AAj///////gACPiIj2d4+AAI////eP/4AAj4iI+IiPgACP//////+AAI+Id3d3f4AAj///////gACPf3+Ij/iAAI/3f//4iIAAj/9///j4gACP////+I8AAIiIiIiI8ADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMABAADAAQAAwAEAAMADAADABwAA</ICON></ITEM><ITEM TYPE="menu" NAME="Ajouter OP" FONCTION="OPPush"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAAAAAAAAd3d3d3AgAAB/////cCIAAI///yIiKiAAj///KqqqowCP//8zMzowAI////+PMwAAj////484AACP////j/gAAI///4iP+AAAj///j4/4AACIiIiI//gAAAAI///4iAAAAAj///j4AAAACIiIiI8AD//wAA//8AAIAvAACAJwAAgAMAAIABAACAAwAAgAcAAIAHAACABwAAgAcAAIAHAACABwAA8AcAAPAHAADwBwAA</ICON></ITEM><ITEM FONCTION="GenerePDF" TYPE="icon" NAME="PDF"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAABmZERERERAAmZEREREREQGZdxERERERAZmPcRERERERmZf4ERGHGRGZmYeIj4eZEZmZmJiBGZkRmZmYdxGZmRGZmZiBGZmZEZmZn5mZmZkRmZl/mZmZmRGZmZiZmZmZEZmZmZmZmZkAeZmZmZmZkQABd3d3d3cACAAQAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAADAAwAA</ICON></ITEM><ITEM TYPE="icon" FONCTION="Mail"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8A//+HZniP//f//4ZmZmeP9//3aI+Idnj3/3aPiP/4Z4f4Z/dmd3d0d/dodndnd3j398hmiGd3d/f4yGb/h3h39/hodv+HeIeH+Gh2j4d4hof4doZnd4iHh/+GiGd4eHf3/4dv///4ePf/+GeP/4eI9///h3d3iP/3////+Ij///cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</ICON></ITEM><ITEM NAME="BC" FONCTION="TransfertDoc" TYPE="icon"><ICON>AAABAAEAEBAEAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACAAAAAgIAAgAAAAIAAgACAgAAAgICAAMDAwAAAAP8AAP8AAAD//wD/AAAA/wD/AP//AAD///8AAAAAAAAAAAAAAAAEcAAAAAAAAAR3AAAAAAAABEcAAAAAAAAER3AAAAAAAAREcAAAAAAABMR3AAAAd3d0xEcAAERkREzMR3AAAEzMzMxEcAAAAEzMzMR3AAAAAEzMxEcAAAAAAEzMR3AAAAAAAExkcAAAAAAAAEwAAAAAAAAAAAD+fwAA/j8AAP4/AAD+HwAA/h8AAP4PAACADwAAgAcAAAAHAACAAwAA4AMAAPgBAAD+AQAA/4AAAP/gAAD/+QAA</ICON></ITEM></INTERFACE><SCRIPTS><SCRIPT NAME="Ouverture">SetVisible "txtTache",Faux
+SetVisible "SaisTache",Faux
+SetValue "txtGroupe","Type saisie"
+CodeRedac</SCRIPT><SCRIPT NAME="Fermeture">CodeRedac</SCRIPT><SCRIPT NAME="Validation">CodeRedac</SCRIPT><SCRIPT NAME="Après validation"/></SCRIPTS></ASXMODULE>
